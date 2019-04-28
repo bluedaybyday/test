@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=gb2312" /> 
+	<title>箭头函数</title>
+	<script type="text/javascript">
+		let fun=()=>{
+			console.log("xxx");
+		}
+		//let x=new fun();//let匿名函数，不能作为构造函数使用new
+		function fun2(){
+			console.log(arguments);
+		}
+		//let fun3=()=>{
+		//	console.log(arguments);
+		//}
+		let fun4=(...a)=>{
+			console.log(a);//let接收Rest参数
+		}
+		var obj={
+			a:10,
+			b:()=>{
+				console.log(this.obj.a);//此处匿名函数的this指window对象
+				console.log(this);
+			},
+			c:function(){
+				console.log(this.a);//此处this指obj
+				console.log(this);
+			},
+			d:function(){
+				return ()=>{console.log(this.a);}//返回匿名函数,this指obj
+			},
+			e:function(){
+				(()=>{
+					console.log(this.a);
+				})();//匿名函数直接执行，
+			}
+		}
+		let obj2={
+			a:10,
+			b:function(n){
+				let f=(n)=>n+this.a;
+				return f(n);
+			},
+			c:function(n){
+				let f=(n)=>n+this.a;
+				let m={a:20};
+				return f.call(m,3);
+				
+				//由于this在箭头函数中已经按照词法作用域绑定了，所以，用call()或者apply()调用箭头函数时，无法对this进行绑定，即传入的第一个参数被忽略：
+			}
+		}
+		//箭头函数没有原型属性
+		var a=()=>{return 1;}
+		function b(){return 2;}
+		window.onload=function(){
+			fun();
+			fun2(1,2,3,4,5);
+		//	fun3(1,2,3);
+			fun4(1,2,3,4);
+			obj.b();
+			obj.c();
+			obj.d()();
+			obj.e();
+			console.log("---------------------------");
+			console.log(obj2.b(1));
+			console.log(obj2.c(1));
+			console.log("---------------------------");
+			console.log(a.prototype);
+			console.log(b.prototype);
+		}
+		//箭头函数的 this 永远指向其上下文的  this ，任何方法都改变不了其指向，如 call() ,  bind() ,  apply() 
+		//普通函数的this指向调用它的那个对象
+	</script>
+</head>
+<body></body>
+</html>
