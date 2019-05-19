@@ -1,0 +1,140 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using EHR.Models;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using MySQL.Data.EntityFrameworkCore.Extensions;
+using NanoFabric.AspNetCore;
+using NanoFabric.RegistryHost.ConsulRegistry;
+using Newtonsoft.Json;
+using EHR.Api.Infrastructure.IServices;
+using EHR.Api.Infrastructure.Services;
+
+namespace EHR.Api
+{
+    public class Startup
+    {
+        public Startup(IHostingEnvironment env)
+        {
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(env.ContentRootPath)
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true)
+                .AddEnvironmentVariables();
+            Configuration = builder.Build();
+        }
+
+        public IConfigurationRoot Configuration { get; }
+
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add framework services.
+            services.AddMvc();
+            services.AddDbContext<IOPEHRContext>(options =>
+            {
+                options.UseMySQL(Configuration["ConnectionString"]).EnableSensitiveDataLogging();
+            });
+            services.AddSwaggerGen(options =>
+            {
+                options.DescribeAllEnumsAsStrings();
+                options.SwaggerDoc("v1", new Swashbuckle.AspNetCore.Swagger.Info
+                {
+                    Title = "",
+                    Version = "v1",
+                    Description = " ",
+                    TermsOfService = ""
+                });
+            });
+            services.AddCors(options =>
+            {
+                options.AddPolicy("CorsPolicy",
+                    builder => builder.AllowAnyOrigin()
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials());
+            });
+
+            #region  consul start            
+            var appSettings = JsonConvert.DeserializeObject<ConsulSettings>(File.ReadAllText("consul_setting.json")); // 获取启动的端口号
+            Configuration.Bind(appSettings);
+            var consulConfig = new ConsulRegistryHostConfiguration
+            {
+                HostName = appSettings.Consul.HostName,
+                Port = appSettings.Consul.Port
+            };
+            services.AddNanoFabric(() => new ConsulRegistryHost(consulConfig));// end
+            #endregion  consul end
+
+            RegisterMyServices(services);//本地服务注册
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        private readonly CancellationTokenSource _consulConfigCancellationTokenSource = new CancellationTokenSource();
+        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory, IApplicationLifetime applicationLifetime)
+        {
+            #region 认证中心API权限控制
+            app.UseIdentityServerAuthentication(
+                new IdentityServerAuthenticationOptions
+                {
+                    Authority = Configuration["IdentityServerSettings_4Api:Authority"],
+                    ApiName = Configuration["IdentityServerSettings_4Api:AllowedScopes"],
+                    AllowedScopes = {
+                        Configuration["IdentityServerSettings_4Api:AllowedScopes"],
+                        Configuration["IdentityServerSettings_4Api:AllowedScopes1"],
+                        Configuration["IdentityServerSettings_4Api:AllowedScopes2"]
+                    },
+                    RequireHttpsMetadata = false
+                });
+            #endregion
+
+            #region consul  //private readonly CancellationTokenSource _consulConfigCancellationTokenSource = new CancellationTokenSource();, IApplicationLifetime applicationLifetime
+            // add tenant & health check
+            //var localAddress = DnsHelper.GetIpAddressAsync().Result; // start
+            var appsettings = JsonConvert.DeserializeObject<ConsulSettings>(File.ReadAllText("consul_setting.json")); // 获取启动的端口号
+            var uri = new Uri($"http://{appsettings.ApplicationSetting.Host}:{appsettings.ApplicationSetting.Port}/");
+            //log.LogInformation("Registering tenant at ${uri}");
+            //var registryInformation = app.AddTenant("values", "1.0.0-pre", uri, tags: new[] { "urlprefix-/values" });
+            //var registryInformation = app.AddTenant("EHR.API", "1.0.0-pre", uri, tags: new[] { "urlprefix-/EHR.API" });
+            //log.LogInformation("Registering additional health check");
+            // register service & health check cleanup
+            applicationLifetime.ApplicationStopping.Register(() =>
+            {
+                //log.LogInformation("Removing tenant & additional health check");
+               // app.RemoveTenant(registryInformation.Id);
+                _consulConfigCancellationTokenSource.Cancel();
+            });
+            #endregion
+
+            loggerFactory.AddConsole(Configuration.GetSection("Logging"));
+            loggerFactory.AddDebug();
+
+            app.UseMvc();
+
+            app.UseSwagger()
+           .UseSwaggerUI(c =>
+           {
+               c.SwaggerEndpoint("/swagger/v1/swagger.json", "EHR.Api V1");
+           });
+        }
+
+        /// <summary>
+        /// 本地服务注册
+        /// </summary>
+        /// <param name="services"></param>
+        private void RegisterMyServices(IServiceCollection services)
+        {
+            services.AddTransient<IReimbursementService, ReimbursementService>();
+            services.AddTransient<IEmployeesService, EmployeesService>();
+            services.AddTransient<IServiceUserSub, ServiceUserSub>();
+
+        }
+    }
+}
