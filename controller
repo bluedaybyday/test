@@ -1,0 +1,101 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using EHR.Api.Infrastructure.IServices;
+using EHR.Models.Models;
+using EHR.Models.ResultMsgs;
+using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json.Linq;
+
+// For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
+
+namespace EHR.Api.Controllers
+{
+    [Produces("application/json")]
+    [Route("api/[controller]/[action]")]
+    public class DicInfoController : BaseController
+    {
+        private readonly IServiceDicInfo _service;
+        public DicInfoController(IServiceDicInfo service)
+        {
+            _service = service;
+        }
+        /// <summary>
+        /// 根据code获取对应的类型列表
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        public async Task<IActionResult> GetTypeListByCode(string code)
+        {
+            var data = await _service.GetTypeListByCode(code);
+            return Ok(data);
+        }
+        /// <summary>
+        ///  根据code获取对应的类型SelectListItem列表
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        public async Task<IActionResult> GetSelectListItemByCode(string code)
+        {
+            var data = await _service.GetSelectListItemByCode(code);
+            return Ok(data);
+        }
+        /// <summary>
+        /// 获取任务类型
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        public async Task<IActionResult> GetList(string dicCode = "", string dicName = "", int isEnabled = -1, int pid = 0, int page = 1, int pageSize = int.MaxValue)
+        {
+            var data = await _service.GetList(dicCode, dicName, isEnabled, pid, page, pageSize);
+            return Ok(data);
+        }
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] DicInfo model)
+        {
+            var data = await _service.Create(model);
+            return Ok(data);
+        }
+        [HttpPost]
+        public async Task<IActionResult> Update([FromBody] DicInfo model)
+        {
+            var data = await _service.Update(model);
+            return Ok(data);
+        }
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var data = await _service.Delete(id);
+            return Ok(data);
+        }
+
+        //获取该字典编码下面的字典
+        [HttpGet]
+        public async Task<IActionResult> GetDicInfo(string code)
+        {
+            try
+            {
+                var result = await _service.GetTypeListByCode(code);
+                var data = result.Data;
+                List<DicInfo> list = data as List<DicInfo>;
+                JArray arr = new JArray();
+                foreach (DicInfo item in list)
+                {
+                    arr.Add(new JObject
+                        {
+                            { "DicType",item.DicType},
+                            { "DicName",item.DicName}
+                        });
+                }
+                BoolResult o = new BoolResult { Result = true, Data = arr };
+                return Ok(o);
+            }
+            catch (Exception e)
+            {
+                BoolResult o = new BoolResult { Result = false, Msg = e.Message };
+                return Ok(o);
+            }
+        }
+    }
+}
