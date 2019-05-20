@@ -1,0 +1,741 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using MySql.Data.MySqlClient;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Newtonsoft.Json.Linq;
+using EHR.Models.Models;
+using EHR.Models.AppVM;
+using EHR.Models.DingModel;
+
+namespace EHR.Models
+{
+    public class IOPEHRContext : DbContext
+    {
+        /// <summary>
+        /// 根据泛型对象，泛型对象实例，存储过程（spname）,参数（parameters） 获取数据
+        /// MySqlParameter[] parameters = new MySqlParameter[1];
+        /// parameters[0] = new MySqlParameter("@userId", UserId);
+        /// </summary>
+        /// <typeparam name="TEntity">泛型对象</typeparam>
+        /// <param name="entity">泛型对象实例</param>
+        /// <param name="spName">存储过程带参数</param>
+        /// <param name="mySqlParameters">参数集合</param>
+        /// <returns></returns>
+        public async Task<List<TEntity>> GetDynamicDataBySpNameAsync<TEntity>(string spName, MySqlParameter[] mySqlParameters = null)
+            where TEntity : new()
+        {
+            TEntity entity = new TEntity();
+            List<TEntity> list = new List<TEntity>();
+            try
+            {
+                using (var conn = Database.GetDbConnection())
+                {
+                    if (conn.State == System.Data.ConnectionState.Closed) conn.Open();
+                    var cmd = conn.CreateCommand();
+                    //spName = spName.Split('(')[0] + "(";
+                    //// 参数设置
+                    //if (mySqlParameters != null)
+                    //{
+                    //    for (int i = 0; i < mySqlParameters.Length; i++)
+                    //    {
+                    //        spName += (i != 0 ? "," : "") + mySqlParameters[i].ParameterName;
+                    //    }
+                    //}
+                    //spName += ")";
+                    //spName = spName.EndsWith(";") ? spName : spName + ";";
+                    //cmd.CommandText = $"call {spName}";
+                    cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                    cmd.CommandText = spName;
+                    //MySqlParameter[] parameters = new MySqlParameter[1];
+                    //parameters[0] = new MySqlParameter("@userId", UserId);
+                    if (mySqlParameters != null)
+                        cmd.Parameters.AddRange(mySqlParameters);
+                    // 参数设置                   
+                    var reader = await cmd.ExecuteReaderAsync();
+                    var propertys = entity.GetType().GetProperties();
+                    string propertyType = "";
+                    string propertyValue = "";
+                    while (reader.Read())
+                    {
+                        TEntity entityResult = new TEntity();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            //创建属性，并赋值。                   
+                            // (dynamicClass as ICollection<KeyValuePair<string, object>>)
+                            //   .Add(new KeyValuePair<string, object>(reader.GetName(i), reader.GetString(i)));                        
+                            var name = reader.GetName(i).ToLower();
+
+                            foreach (var property in propertys)
+                            {
+                                if (property.Name.ToLower() == name)
+                                {
+                                    propertyType = property.PropertyType.ToString();
+                                    propertyValue = reader[i].ToString();// reader.GetString(i);
+                                    var value = GetDynamicValue(propertyType, propertyValue);
+                                    property.SetValue(entityResult, value);
+                                    break;
+                                }
+                            }
+                        }
+                        list.Add(entityResult);
+                    }
+                    cmd.Dispose();
+                    conn.Close();
+                    conn.Dispose();
+                }
+                return list;
+            }
+            catch (Exception ex)
+            {
+                var d = ex.Message;
+                list.Add(entity);
+            }
+            return list;
+        }
+        /// <summary>
+        /// 根据泛型对象，泛型对象实例，存储过程（spname）,参数（parameters） 获取数据【2个结果集数据】
+        /// MySqlParameter[] parameters = new MySqlParameter[1];
+        /// parameters[0] = new MySqlParameter("@userId", UserId);
+        /// </summary>
+        /// <typeparam name="TEntityIn">第一个结果集泛型（集合）</typeparam>
+        /// <typeparam name="TEntityOut">第二个结果集泛型（单个）</typeparam>
+        /// <param name="spName">存储过程名称</param>
+        /// <param name="entityOut">out 参数TEntityOut</param>
+        /// <param name="mySqlParameters"></param>
+        /// <returns></returns>
+        public List<TEntityIn> GetDynamicDataBySpNameWithOut<TEntityIn, TEntityOut>(string spName, out TEntityOut entityOut, MySqlParameter[] mySqlParameters = null)
+            where TEntityIn : new()
+            where TEntityOut : new()
+        {
+            TEntityIn entity = new TEntityIn();
+            List<TEntityIn> list = new List<TEntityIn>();
+            entityOut = new TEntityOut();
+            try
+            {
+                using (var conn = Database.GetDbConnection())
+                {
+                    if (conn.State == System.Data.ConnectionState.Closed) conn.Open();
+                    var cmd = conn.CreateCommand();
+                    spName = spName.Split('(')[0] + "(";
+                    // 参数设置
+                    if (mySqlParameters != null)
+                    {
+                        for (int i = 0; i < mySqlParameters.Length; i++)
+                        {
+                            spName += (i != 0 ? "," : "") + mySqlParameters[i].ParameterName;
+                        }
+                    }
+                    spName += ")";
+                    spName = spName.EndsWith(";") ? spName : spName + ";";
+                    cmd.CommandText = $"call {spName}";
+                    //MySqlParameter[] parameters = new MySqlParameter[1];
+                    //parameters[0] = new MySqlParameter("@userId", UserId);
+                    if (mySqlParameters != null)
+                        cmd.Parameters.AddRange(mySqlParameters);
+                    // 参数设置                   
+                    var reader = cmd.ExecuteReader();
+
+
+                    if (reader.HasRows) // 第一个结果集 
+                    {
+                        var propertys = entity.GetType().GetProperties();
+                        string propertyType = "";
+                        string propertyValue = "";
+                        // 第一个结果集
+                        while (reader.Read())
+                        {
+                            TEntityIn entityResult = new TEntityIn();
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                //创建属性，并赋值。                   
+                                // (dynamicClass as ICollection<KeyValuePair<string, object>>)
+                                //   .Add(new KeyValuePair<string, object>(reader.GetName(i), reader.GetString(i)));                        
+                                var name = reader.GetName(i).ToLower();
+
+                                foreach (var property in propertys)
+                                {
+                                    if (property.Name.ToLower() == name)
+                                    {
+                                        propertyType = property.PropertyType.ToString();
+                                        propertyValue = reader[i].ToString();// reader.GetString(i);
+                                        var value = GetDynamicValue(propertyType, propertyValue);
+                                        property.SetValue(entityResult, value);
+                                        break;
+                                    }
+                                }
+                            }
+                            list.Add(entityResult);
+                        }
+                    }
+
+                    // 第一个结果集 
+                    // 第2个结果集
+                    if (reader.NextResult()) // 第2个结果集
+                    {
+                        if (reader.HasRows)
+                        {
+                            var propertys = entityOut.GetType().GetProperties();
+                            string propertyType = "";
+                            string propertyValue = "";
+
+                            while (reader.Read())
+                            {
+                                TEntityOut entityResultOut = new TEntityOut();
+                                for (int i = 0; i < reader.FieldCount; i++)
+                                {
+                                    //创建属性，并赋值。                   
+                                    // (dynamicClass as ICollection<KeyValuePair<string, object>>)
+                                    //   .Add(new KeyValuePair<string, object>(reader.GetName(i), reader.GetString(i)));                        
+                                    var name = reader.GetName(i).ToLower();
+
+                                    foreach (var property in propertys)
+                                    {
+                                        if (property.Name.ToLower() == name)
+                                        {
+                                            propertyType = property.PropertyType.ToString();
+                                            propertyValue = reader[i].ToString();// reader.GetString(i);
+                                            var value = GetDynamicValue(propertyType, propertyValue);
+                                            property.SetValue(entityResultOut, value);
+                                            break;
+                                        }
+                                    }
+                                }
+                                entityOut = entityResultOut;
+                            }
+                        }
+                    }
+                    // 第2个结果集                    
+
+                    cmd.Dispose();
+                    conn.Close();
+                    conn.Dispose();
+                }
+                return list;
+            }
+            catch (Exception ex)
+            {
+                var d = ex.Message;
+                list.Add(entity);
+            }
+            return list;
+        }
+        public async Task<JArray> QueryScalarList(string sql)
+        {
+            JArray x = new JArray();
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.Text;
+                    cmd.CommandText = sql;
+                    var reader = await cmd.ExecuteReaderAsync();
+                    while (reader.Read())
+                    {
+                        JObject y = new JObject();
+                        for (var i = 0; i < reader.FieldCount; i++)
+                        {
+                            var name = reader.GetName(i);
+                            y[name] = reader[i].ToString();
+                        }
+                        x.Add(y);
+                    }
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public async Task<JArray> QueryScalarSPList(string spname, MySqlParameter[] mySqlParameters = null)
+        {
+            JArray x = new JArray();
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                    cmd.CommandText = spname;
+                    cmd.Parameters.AddRange(mySqlParameters);
+                    var reader = await cmd.ExecuteReaderAsync();
+                    while (reader.Read())
+                    {
+                        JObject y = new JObject();
+                        for (var i = 0; i < reader.FieldCount; i++)
+                        {
+                            var name = reader.GetName(i);
+                            y[name] = reader[i].ToString();
+                        }
+                        x.Add(y);
+                    }
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public async Task<string> QueryScalar(string sql)
+        {
+            string x = "";
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.Text;
+                    cmd.CommandText = sql;
+                    var y = await cmd.ExecuteScalarAsync();
+                    x = y.ToString();
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public async Task<string> QueryScalarSP(string spname, MySqlParameter[] mySqlParameters = null)
+        {
+            string x = "";
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                    cmd.CommandText = spname;
+                    cmd.Parameters.AddRange(mySqlParameters);
+                    var y = await cmd.ExecuteScalarAsync();
+                    x = y.ToString();
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public async Task<int> QueryScalarNon(string sql)
+        {
+            int x = 0;
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.Text;
+                    cmd.CommandText = sql;
+                    x = await cmd.ExecuteNonQueryAsync();
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public async Task<int> QueryScalarSPNon(string spname, MySqlParameter[] mySqlParameters = null)
+        {
+            int x = 0;
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                    cmd.CommandText = spname;
+                    cmd.Parameters.AddRange(mySqlParameters);
+                    x = await cmd.ExecuteNonQueryAsync();
+                    cmd.Dispose();
+                    con.Close();
+                    con.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+        public dynamic GetDynamicValue(string propertyType, string propertyValue)
+        {
+            dynamic value;
+            switch (propertyType)
+            {
+                case "System.Int64":
+                case "System.Nullable`1[System.Int64]":
+                    value = Convert.ToInt64(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.Int32":
+                case "System.Nullable`1[System.Int32]":
+                    value = Convert.ToInt32(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.Int16":
+                case "System.Nullable`1[System.Int16]":
+                    value = Convert.ToInt16(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.Decimal":
+                case "System.Nullable`1[System.Decimal]":
+                    value = Convert.ToDecimal(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.Double":
+                case "System.Nullable`1[System.Double]":
+                    value = Convert.ToDouble(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.DateTime":
+                case "System.Nullable`1[System.DateTime]":
+                    value = Convert.ToDateTime(string.IsNullOrEmpty(propertyValue) ? "1901-01-01" : propertyValue);
+                    break;
+                case "System.Float":
+                case "System.Nullable`1[System.Float]":
+                    value = Convert.ToDouble(string.IsNullOrEmpty(propertyValue) ? "0" : propertyValue);
+                    break;
+                case "System.Boolean":
+                case "System.Nullable`1[System.Boolean]":
+                    value = Convert.ToBoolean(string.IsNullOrEmpty(propertyValue) ? false : (propertyValue.ToLower() == "true" || propertyValue == "1") ? true : false);
+                    break;
+                case "System.Byte":
+                case "System.Nullable`1[System.Byte]":
+                    value = Convert.ToByte(string.IsNullOrEmpty(propertyValue) ? "" : propertyValue);
+                    break;
+                case "System.Guid":
+                case "System.Nullable`1[System.Guid]":
+                    value = Guid.Parse(string.IsNullOrEmpty(propertyValue) ? "" : propertyValue);
+                    break;
+                case "System.Char":
+                case "System.Nullable`1[System.Char]":
+                    value = Convert.ToChar(string.IsNullOrEmpty(propertyValue) ? "" : propertyValue);
+                    break;
+                default:
+                    value = propertyValue;
+                    break;
+            }
+            return value;
+        }
+        public IOPEHRContext(DbContextOptions<IOPEHRContext> options) : base(options)
+        {
+            Database.EnsureCreated();
+        }
+
+
+        public DbSet<Remind> _remind { get; set; }
+        public DbSet<DicInfo> DicInfos { get; set; }
+        public DbSet<UserSub> UserSubs { get; set; }
+        public DbSet<Role> Roles { get; set; }
+        public DbSet<AppUpgrade> _appUpgrade { get; set; }//APP版本升级表
+        public DbSet<PCUpgrade> _pcUpgrade { get; set; }// PC端应用版本升级表
+        /// <summary>
+        ///发票申请
+        /// </summary>
+        public DbSet<Reimbursement> Reimbursement { get; set; }
+        public DbSet<Employees> _employees { get; set; }
+        public DbSet<UserSub> _usersub { get; set; }
+
+        public DbSet<Organization> _Organization { get; set; }
+        public DbSet<User_Org> _User_Org { get; set; }
+        public DbSet<Guild_detail_info> _Guild_detail_info { get; set; }
+        public DbSet<Guild_ant_info> _Guild_ant_info { get; set; }
+        public DbSet<WorkFlow> _workflow { get; set; }
+        public DbSet<WorkFlowBill> _workflowbill { get; set; }
+        public DbSet<WorkFlowi> _workflowi { get; set; }
+        public DbSet<WorkFlowi_User> _workflowi_user { get; set; }
+        /// <summary>
+        /// 采购
+        /// </summary>
+        public DbSet<Purchase> _purchase { get; set; }
+        /// <summary>
+        /// 差旅
+        /// </summary>
+        public DbSet<Travel> _travel { get; set; }
+        public DbSet<TravelInfo> _travelinfo { get; set; }
+        public DbSet<WorkUser> _workuser { get; set; }
+        public DbSet<WorkUseri> _workuseri { get; set; }
+        public DbSet<WorkUserBill> _workuserbill { get; set; }
+        public DbSet<CashManage> _cashmanage { get; set; }
+        /// <summary>
+        /// 采购详情
+        /// </summary>
+        public DbSet<PurchaseDetails> _purchaseDetails { get; set; }
+        public DbSet<Menu> _menu { get; set; }
+        public DbSet<Menu2> _menu2 { get; set; }
+        public DbSet<Client> _client { get; set; }
+        public DbSet<RoleClient> _roleclient { get; set; }
+        public DbSet<RoleMenu> _rolemenu { get; set; }
+        public DbSet<User_Role> _userrole { get; set; }
+        public DbSet<APPWorkDaily> _appworkdaily { get; set; }
+        public DbSet<APPWorkTask> _appworktask { get; set; }
+        public DbSet<APPWorkTaskTrack> _appworktasktrack { get; set; }
+        public DbSet<APPWorkTaskUserCS> _appworktaskusercs { get; set; }
+        public DbSet<APPWorkTaskUserZX> _appworktaskuserzx { get; set; }
+        /// <summary>
+        /// 用户主表
+        /// </summary>
+        public DbSet<UserMain> _userMain { get; set; }
+        public DbSet<DingDepartment> _dingDepartments { get; set; }
+        public DbSet<DingUser> _dingUsers { get; set; }
+        public DbSet<DingKqdaily> _dingKqdailys { get; set; }
+        
+        void Configure_Employees(EntityTypeBuilder<Employees> builder)
+        {
+            builder.ToTable("Employees");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_UserSub(EntityTypeBuilder<UserSub> builder)
+        {
+            builder.ToTable("UserSub");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Role(EntityTypeBuilder<Role> builder)
+        {
+            builder.ToTable("Role");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_DicInfo(EntityTypeBuilder<DicInfo> builder)
+        {
+            builder.ToTable("DicInfo");
+            builder.HasKey(ci => ci.ID);
+        }
+        void Configure_Guild_ant_info(EntityTypeBuilder<Guild_ant_info> builder)
+        {
+            builder.ToTable("Guild_ant_info");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Guild_detail_info(EntityTypeBuilder<Guild_detail_info> builder)
+        {
+            builder.ToTable("Guild_detail_info");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_User_Org(EntityTypeBuilder<User_Org> builder)
+        {
+            builder.ToTable("User_Org");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Organization(EntityTypeBuilder<Organization> builder)
+        {
+            builder.ToTable("Organization");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkFlow(EntityTypeBuilder<WorkFlow> builder)
+        {
+            builder.ToTable("WorkFlow");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkFlowBill(EntityTypeBuilder<WorkFlowBill> builder)
+        {
+            builder.ToTable("WorkFlowBill");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkFlowi(EntityTypeBuilder<WorkFlowi> builder)
+        {
+            builder.ToTable("WorkFlowi");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkFlowi_User(EntityTypeBuilder<WorkFlowi_User> builder)
+        {
+            builder.ToTable("WorkFlowi_User");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Purchase(EntityTypeBuilder<Purchase> builder)
+        {
+            builder.ToTable("Purchase");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Travel(EntityTypeBuilder<Travel> builder)
+        {
+            builder.ToTable("Travel");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_TravelInfo(EntityTypeBuilder<TravelInfo> builder)
+        {
+            builder.ToTable("TravelInfo");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkUser(EntityTypeBuilder<WorkUser> builder)
+        {
+            builder.ToTable("WorkUser");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkUseri(EntityTypeBuilder<WorkUseri> builder)
+        {
+            builder.ToTable("WorkUseri");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_WorkUserBill(EntityTypeBuilder<WorkUserBill> builder)
+        {
+            builder.ToTable("WorkUserBill");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_CashManage(EntityTypeBuilder<CashManage> builder)
+        {
+            builder.ToTable("CashManage");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_PurchaseDetails(EntityTypeBuilder<PurchaseDetails> builder)
+        {
+            builder.ToTable("PurchaseDetails");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_Menu(EntityTypeBuilder<Menu> builder)
+        {
+            builder.ToTable("Menu");
+            builder.HasKey(ci => ci.HId);
+        }
+        void Configure_Menu2(EntityTypeBuilder<Menu2> builder)
+        {
+            builder.ToTable("Menu2");
+            builder.HasKey(ci => ci.HId);
+        }
+        void Configure_Client(EntityTypeBuilder<Client> builder)
+        {
+            builder.ToTable("Client");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_RoleClient(EntityTypeBuilder<RoleClient> builder)
+        {
+            builder.ToTable("RoleClient");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_RoleMenu(EntityTypeBuilder<RoleMenu> builder)
+        {
+            builder.ToTable("RoleMenu");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_User_Role(EntityTypeBuilder<User_Role> builder)
+        {
+            builder.ToTable("User_Role");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_UserMain(EntityTypeBuilder<UserMain> builder)
+        {
+            builder.ToTable("UserMain");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_APPWorkDaily(EntityTypeBuilder<APPWorkDaily> builder)
+        {
+            builder.ToTable("APPWorkDaily");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_APPWorkTask(EntityTypeBuilder<APPWorkTask> builder)
+        {
+            builder.ToTable("APPWorkTask");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_APPWorkTaskTrack(EntityTypeBuilder<APPWorkTaskTrack> builder)
+        {
+            builder.ToTable("APPWorkTaskTrack");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_APPWorkTaskUserCS(EntityTypeBuilder<APPWorkTaskUserCS> builder)
+        {
+            builder.ToTable("APPWorkTaskUserCS");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_APPWorkTaskUserZX(EntityTypeBuilder<APPWorkTaskUserZX> builder)
+        {
+            builder.ToTable("APPWorkTaskUserZX");
+            builder.HasKey(ci => ci.Id);
+        }
+        void Configure_AppUpgrade(EntityTypeBuilder<AppUpgrade> builder)
+        {
+            builder.ToTable("AppUpgrade");
+            builder.HasKey(c => c.Id);
+        }
+        void Configure_PCUpgrade(EntityTypeBuilder<PCUpgrade> builder)
+        {
+            builder.ToTable("PCUpgrade");
+            builder.HasKey(c => c.Id);
+        }
+        void Configure_DingDepartment(EntityTypeBuilder<DingDepartment> builder)
+        {
+            builder.ToTable("DingDepartment");
+            builder.HasKey(ci => ci.id);
+        }
+        void Configure_DingUser(EntityTypeBuilder<DingUser> builder)
+        {
+            builder.ToTable("DingUser");
+            builder.HasKey(ci => ci.userid);
+        }
+        void Configure_DingKqdaily(EntityTypeBuilder<DingKqdaily> builder)
+        {
+            builder.ToTable("DingKqdaily");
+            builder.HasKey(ci => ci.id);
+        }
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            builder.Entity<Employees>(Configure_Employees);
+            builder.Entity<UserSub>(Configure_UserSub);
+            builder.Entity<Role>(Configure_Role);
+            builder.Entity<DicInfo>(Configure_DicInfo);
+
+            builder.Entity<Guild_detail_info>(Configure_Guild_detail_info);
+            builder.Entity<Guild_ant_info>(Configure_Guild_ant_info);
+            builder.Entity<User_Org>(Configure_User_Org);
+            builder.Entity<Organization>(Configure_Organization);
+            builder.Entity<WorkFlow>(Configure_WorkFlow);
+            builder.Entity<WorkFlowBill>(Configure_WorkFlowBill);
+            builder.Entity<WorkFlowi>(Configure_WorkFlowi);
+            builder.Entity<WorkFlowi_User>(Configure_WorkFlowi_User);
+            builder.Entity<Purchase>(Configure_Purchase);
+            builder.Entity<Travel>(Configure_Travel);
+            builder.Entity<WorkUser>(Configure_WorkUser);
+            builder.Entity<WorkUseri>(Configure_WorkUseri);
+            builder.Entity<WorkUserBill>(Configure_WorkUserBill);
+            builder.Entity<CashManage>(Configure_CashManage);
+            builder.Entity<PurchaseDetails>(Configure_PurchaseDetails);
+            builder.Entity<Menu>(Configure_Menu);
+            builder.Entity<Menu2>(Configure_Menu2);
+            builder.Entity<Client>(Configure_Client);
+            builder.Entity<RoleClient>(Configure_RoleClient);
+            builder.Entity<RoleMenu>(Configure_RoleMenu);
+            builder.Entity<User_Role>(Configure_User_Role);
+            builder.Entity<TravelInfo>(Configure_TravelInfo);
+            builder.Entity<UserMain>(Configure_UserMain);
+            builder.Entity<APPWorkDaily>(Configure_APPWorkDaily);
+            builder.Entity<APPWorkTask>(Configure_APPWorkTask);
+            builder.Entity<APPWorkTaskTrack>(Configure_APPWorkTaskTrack);
+            builder.Entity<APPWorkTaskUserCS>(Configure_APPWorkTaskUserCS);
+            builder.Entity<APPWorkTaskUserZX>(Configure_APPWorkTaskUserZX);
+            builder.Entity<AppUpgrade>(Configure_AppUpgrade);
+            builder.Entity<PCUpgrade>(Configure_PCUpgrade);
+            builder.Entity<DingDepartment>(Configure_DingDepartment);
+            builder.Entity<DingUser>(Configure_DingUser);
+            builder.Entity<DingKqdaily>(Configure_DingKqdaily);
+        }
+
+    }
+}
