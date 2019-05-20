@@ -1,0 +1,112 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using EHR.Api.Infrastructure.IServices;
+using EHR.Models;
+using EHR.Models.ResultMsgs;
+using Microsoft.EntityFrameworkCore;
+
+namespace EHR.Api.Infrastructure.Services
+{
+    public class CashManageService : ICashManageService
+    {
+        private IOPEHRContext _context;
+        public CashManageService(IOPEHRContext context)
+        {
+            _context = context;
+        }
+
+        private string GetBillNo()
+        {
+            string prefix = "JZ";//获取编号前缀
+            var dateStr = DateTime.Now.ToString("yyMMdd");//当前日期6位数
+            var random = "001";//初始化最后编号
+            var x = _context._cashmanage.Where(m=>m.BillNo.Contains(prefix+dateStr)).OrderByDescending(m => m.Id).FirstOrDefault();
+            if (x != null)
+            {
+                var billNo = x.BillNo;
+                var len = billNo.Length - 3;
+                var billNoShort = billNo.Substring(len);//截取最后三位
+                var billNoInt = Convert.ToInt32(billNoShort);
+                var billNoLast = billNoInt + 1;//加1
+                random = billNoLast.ToString().PadLeft(3, '0');//不足3位，左边填充0
+            }
+            var billNoStr = prefix + dateStr + random;//返回最后生成的编号
+            return billNoStr;
+        }
+        public async Task<BoolResult> Create(CashManage x)
+        {
+            try
+            {
+                if (x == null)
+                    return new BoolResult { Result = false, Msg = "数据不能为空" };
+                x.BillNo = GetBillNo();
+                x.createdt = DateTime.Now;
+                x.lasteditdt = DateTime.Now;
+                x.dook = 0;
+                await _context._cashmanage.AddAsync(x);
+                await Task.Run(() => { _context.SaveChanges(); });
+                return new BoolResult { Result = true, Msg = "新增成功", Data = x };
+            }
+            catch (Exception ex)
+            {
+                return new BoolResult { Result = false, Msg = "新增失败，" + ex.Message, Data = ex.StackTrace };
+            }
+        }
+        public async Task<BoolResult> Update(CashManage x)
+        {
+            try
+            {
+                var entity = await _context._cashmanage.FirstOrDefaultAsync(m => m.Id == x.Id);
+                if (entity == null)
+                    return new BoolResult { Result = false, Msg = "数据不能为空" };
+                entity.UserId = x.UserId;
+                entity.Dodt = x.Dodt;
+                entity.OrgId = x.OrgId;
+                entity.Reason = x.Reason;
+                entity.Amount = x.Amount;
+                entity.Remark = x.Remark;
+                entity.Isdraft = x.Isdraft;
+                entity.lasteditdt = DateTime.Now;
+                entity.FileAddr = x.FileAddr;
+                await Task.Run(() => { _context.SaveChanges(); });
+                return new BoolResult { Result = true, Msg = "修改成功", Data = entity };
+            }
+            catch (Exception ex)
+            {
+                return new BoolResult { Result = false, Msg = "修改失败，" + ex.Message, Data = ex.StackTrace };
+            }
+        }
+        public async Task<BoolResult> Delete(int id)
+        {
+            try
+            {
+                var x = await _context._cashmanage.FirstOrDefaultAsync(m => m.Id == id);
+                if (x == null)
+                    return new BoolResult { Result = false, Msg = "数据不能为空" };
+                _context._cashmanage.Remove(x);
+                await Task.Run(() => { _context.SaveChanges(); });
+                return new BoolResult { Result = true, Msg = "删除成功" };
+            }
+            catch (Exception ex)
+            {
+                return new BoolResult { Result = false, Msg = "删除失败，" + ex.Message, Data = ex.StackTrace };
+            }
+        }
+        public async Task<CashManage> Get(int id)
+        {
+            try
+            {
+                var x = await _context._cashmanage.FirstOrDefaultAsync(m => m.Id == id);
+                if (x == null)
+                    return null;
+                return x;
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+    }
+}
