@@ -1,0 +1,48 @@
+using h_hangfire.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using System;
+using System.Threading.Tasks;
+
+namespace h_hangfire.DAL
+{
+    public class HDbContext:DbContext
+    {
+        public HDbContext(DbContextOptions<HDbContext> options) : base(options)
+        {
+            Database.EnsureCreated();
+        }
+        public DbSet<RecurringJob_Url> _Urls { get; set; }
+        void Configure_RecurringJob_Url(EntityTypeBuilder<RecurringJob_Url> builder)
+        {
+            builder.ToTable("RecurringJob_Url").HasKey(m => m.Id);
+        }
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            builder.Entity<RecurringJob_Url>(Configure_RecurringJob_Url);
+        }
+        public async Task<string> QueryScalar(string sql)
+        {
+            string x = "";
+            try
+            {
+                using (var con = Database.GetDbConnection())
+                {
+                    if (con.State == System.Data.ConnectionState.Closed) con.Open();
+
+                    var cmd = con.CreateCommand();
+                    cmd.CommandType = System.Data.CommandType.Text;
+                    cmd.CommandText = sql;
+                    var y = await cmd.ExecuteScalarAsync();
+                    x = y.ToString();
+                    cmd.Dispose();
+                }
+                return x;
+            }
+            catch (Exception e)
+            {
+                return x;
+            }
+        }
+    }
+}
